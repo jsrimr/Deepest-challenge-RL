@@ -19,6 +19,43 @@ class Trainer:
             result = self._train_epoch(epoch)
             print('Epoch: [{0}]\t Avg Loss {loss:.4f}\t Avg Accuracy {acc:.3f}'.format(epoch, loss=result['loss'], acc=result['acc']))
 
+    def test(self):
+        self.model.eval()
+        self.losses.reset()
+        self.accs.reset()
+
+        for batch_idx, (docs, labels, doc_lengths, sent_lengths) in enumerate(self.dataloader):
+            batch_size = labels.size(0)
+
+            docs = docs.to(self.device)  # (batch_size, padded_doc_length, padded_sent_length)
+            labels = labels.to(self.device)  # (batch_size)
+            sent_lengths = sent_lengths.to(self.device)  # (batch_size, padded_doc_length)
+            doc_lengths = doc_lengths.to(self.device)  # (batch_size)
+
+            scores, word_att_weights, sentence_att_weights = self.model(docs, doc_lengths, sent_lengths)  # (n_docs, n_classes), (n_docs, max_doc_len_in_batch, max_sent_len_in_batch), (n_docs, max_doc_len_in_batch)
+            
+            loss = self.criterion(scores, labels)
+
+            # loss.backward()
+
+            # self.optimizer.step()
+
+            # if self.config.max_grad_norm is not None:
+            #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+
+            # Compute accuracy
+            predictions = scores.max(dim=1)[1]
+            correct_predictions = torch.eq(predictions, labels).sum().item()
+            acc = correct_predictions
+
+            self.losses.update(loss.item(), batch_size)
+            self.accs.update(acc, batch_size)
+
+            print(f'[{batch_idx}/{len(self.dataloader)}]\t Loss {self.losses.val:.4f}(avg: {self.losses.avg:.4f})\t Acc {self.accs.val:.3f} (avg: {self.accs.avg:.3f})')
+
+        log = {'loss': self.losses.avg, 'acc': self.accs.avg}
+        return log
+
 
     def _train_epoch(self, epoch_idx):
         self.model.train()
@@ -39,12 +76,14 @@ class Trainer:
             
             loss = self.criterion(scores, labels)
 
+            self.optimizer.zero_grad() #NOTE
             loss.backward()
 
-            self.optimizer.step()
-
+            #optimizer.step 전에 clipping 해야하지 않을까 -> adam 이니까 아예 없어도 괜찮을수도? :https://kh-kim.gitbook.io/natural-language-processing-with-pytorch/00-cover-6/05-gradient-clipping
             if self.config.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+            self.optimizer.step()
+
 
             # Compute accuracy
             predictions = scores.max(dim=1)[1]

@@ -29,7 +29,8 @@ class HierarchialAttentionNetwork(nn.Module):
 
         # classifier
         self.fc = nn.Linear(2 * sent_gru_hidden_dim, num_classes)
-        self.out = nn.Softmax(dim=-1)
+        # Note : NLL loss 는 LogSoftmax 가 필요함
+        self.out = nn.LogSoftmax(dim=-1)
 
 
     def forward(self, docs, doc_lengths, sent_lengths):
@@ -89,19 +90,24 @@ class SentenceAttention(nn.Module):
         # effective batch size at each timestep
         valid_bsz = packed_sents.batch_sizes
 
-        # Make a long batch of sentence lengths by removing pad-sentences
+#sent_length : word 가 최대 몇개
+#doc_length : sentence 가 최대 몇개
+
+        # Make a long batch of sentence lengths by removing pad-sentences 
         # i.e. `sent_lengths` was of size (num_docs, padded_doc_length)
         # -> `packed_sent_lengths.data` is now of size (num_sents)
         packed_sent_lengths = pack_padded_sequence(sent_lengths, lengths=doc_lengths.tolist(), batch_first=True)
+
+        ## 여기 왜 for문이 없지??
 
         # Word attention module
         sents, word_att_weights = self.word_attention(packed_sents.data, packed_sent_lengths.data)
 
         # Sentence-level GRU over sentence embeddings
-        packed_sents, _ = self.gru(PackedSequence(sents, valid_bsz))
+        packed_sents, _ = self.gru(PackedSequence(sents, valid_bsz)) # =h(i)
 
         # Restore as documents by repadding
-        docs, _ = pad_packed_sequence(packed_sents, batch_first=True)
+        docs, _ = pad_packed_sequence(packed_sents, batch_first=True) # = h(i)
 
         # Sentence attention
         att = torch.tanh(self.sent_attention(packed_sents.data))
@@ -117,7 +123,8 @@ class SentenceAttention(nn.Module):
         docs = docs * sent_att_weights.unsqueeze(2)
         docs = docs.sum(dim=1)
 
-        # Restore as documents by repadding
+        # Restore as documents by repadding 
+
         word_att_weights, _ = pad_packed_sequence(PackedSequence(word_att_weights, valid_bsz), batch_first=True)
 
         # Restore the original order of documents (undo the first sorting)
@@ -171,16 +178,19 @@ class WordAttention(nn.Module):
 
         sents = self.embeddings(sents)
 
+        # -> `packed_sents.data` is now of size (num_sents, padded_sent_length)
+        # -> `packed_sent_lengths.data` is now of size (num_sents)
+
+        # -> `packed_words` is now of size (num_words)
         packed_words = pack_padded_sequence(sents, lengths=sent_lengths.tolist(), batch_first=True)
-        
          # effective batch size at each timestep
         valid_bsz = packed_words.batch_sizes
 
         # Apply word-level GRU over word embeddings
-        packed_words, _ = self.gru(packed_words)
+        packed_words, _ = self.gru(packed_words) # =h(ij)
 
         # Restore as sentences by repadding
-        sents, _ = pad_packed_sequence(packed_words, batch_first=True)
+        sents, _ = pad_packed_sequence(packed_words, batch_first=True) # =h(ij)
 
         # Word Attenton
         att = torch.tanh(self.attention(packed_words.data))
@@ -193,11 +203,11 @@ class WordAttention(nn.Module):
         att_weights = att / torch.sum(att)
 
         # Compute sentence vectors
-        sents = sents * att_weights.unsqueeze(2)
+        sents = sents * att_weights.unsqueeze(2) # 곱해지는게 이상하다 -> 안 이상하다
         sents = sents.sum(dim=1)
 
         # Restore the original order of sentences (undo the first sorting)
         _, sent_unperm_idx = sent_perm_idx.sort(dim=0, descending=False) 
-        sents = sents[sent_unperm_idx] 
+        sents = sents[sent_unperm_idx]
 
         return sents, att_weights

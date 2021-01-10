@@ -10,6 +10,12 @@ from dataset import News20Dataset
 from dataloader import MyDataLoader
 from trainer import Trainer
 
+import neptune
+
+# neptune.init(project_qualified_name='jeffrey/HAN-for-DocumentClassification',
+#              api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vdWkubmVwdHVuZS5haSIsImFwaV91cmwiOiJodHRwczovL3VpLm5lcHR1bmUuYWkiLCJhcGlfa2V5IjoiNDA0MjIyMmQtZmFkNC00NzlmLWJmNTctMjJmZTcwNDg4OTc5In0=",
+#              )
+# neptune.create_experiment()
 
 def train(config, device):
     dataset = News20Dataset(config.cache_data_dir, config.vocab_path, is_train=True)
@@ -33,6 +39,27 @@ def train(config, device):
     trainer = Trainer(config, model, optimizer, criterion, dataloader)
     trainer.train()
 
+def test(config, device):
+    dataset = News20Dataset(config.cache_data_dir, config.vocab_path, is_train=False)
+    dataloader = MyDataLoader(dataset, config.batch_size)
+
+    model = HierarchialAttentionNetwork(
+        num_classes=dataset.num_classes,
+        vocab_size=dataset.vocab_size,
+        embed_dim=config.embed_dim,
+        word_gru_hidden_dim=config.word_gru_hidden_dim,
+        sent_gru_hidden_dim=config.sent_gru_hidden_dim,
+        word_gru_num_layers=config.word_gru_num_layers,
+        sent_gru_num_layers=config.sent_gru_num_layers,
+        word_att_dim=config.word_att_dim,
+        sent_att_dim=config.sent_att_dim).to(device)
+
+    # optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, model.parameters()), lr=config.lr)
+    criterion = nn.NLLLoss(reduction='sum').to(device)
+
+    trainer = Trainer(config, model, None, criterion, dataloader)
+    trainer.test()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Bug squash for Hierarchical Attention Networks')
@@ -52,6 +79,7 @@ if __name__ == '__main__':
     
     parser.add_argument("--vocab_path", type=str, default="data/glove/glove.6B.100d.txt")
     parser.add_argument("--cache_data_dir", type=str, default="data/news20/")
+    parser.add_argument("--test", type=bool, default=False)
 
     config = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,4 +93,7 @@ if __name__ == '__main__':
         print("Ending this run.")
         sys.exit()
 
-    train(config, device)
+    if config.test:
+        test(config, device)
+    else:
+        train(config, device)
